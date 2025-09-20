@@ -65,4 +65,14 @@ class OrderItem(models.Model):
     def __str__(self):
         return self.menuitem.title
 
+class MenuItemReview(models.Model):
+    menuitem = models.ForeignKey("MenuItem", on_delete=models.CASCADE, related_name="reviews")
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    rating = models.PositiveIntegerField(default=1)
+    comment = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('menuitem', 'user')
+
   

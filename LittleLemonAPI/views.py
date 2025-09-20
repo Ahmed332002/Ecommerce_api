@@ -7,6 +7,14 @@ from .models import MenuItem, Category, Cart, CartItem, Order, OrderItem
 from rest_framework.pagination import PageNumberPagination
 from .serializers import *
 from .serializers import UserCreateSerializer
+from django.conf import settings
+from rest_framework.decorators import action
+import stripe
+from rest_framework.exceptions import ValidationError
+
+
+
+
 
 
 # صلاحيات مخصصة
@@ -22,7 +30,7 @@ class IsDeliveryCrew(permissions.BasePermission):
 class MenuItemViewSet(viewsets.ModelViewSet):
     serializer_class = MenuItemSerializer
     queryset = MenuItem.objects.select_related('category').all()
-    filterset_fields = ['category__id']
+    filterset_fields = ['category_id']
     ordering_fields = ['price']
     search_fields = ['title']
     pagination_class=PageNumberPagination
@@ -60,6 +68,8 @@ class CartViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet,mixins.Crea
                   mixins.ListModelMixin,mixins.UpdateModelMixin):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "cart"
+
    
     def get_permissions(self):
         """
@@ -92,6 +102,7 @@ class CartViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet,mixins.Crea
 class CartItemViewSet(viewsets.ModelViewSet):
     serializer_class = CartItemSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "cart"
 
     def get_queryset(self):
         user = self.request.user
@@ -127,6 +138,26 @@ class CartItemViewSet(viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "order"
+
+    @action(detail=True, methods=['POST'],throttle_scope="payment")
+    def pay(self, request, pk=None):
+        order = self.get_object()
+        session = initiate_payment(order.id)   # ✅ خليها كده
+        if session:
+            return Response({"session_url": session.url}, status=status.HTTP_200_OK)
+        return Response({"error": "Failed to create payment session"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+    @action(detail=True, methods=['get'])
+    def success_payment(self, request, pk=None):
+        order = self.get_object()
+        order.status = 1  # Delivered / Paid حسب الـ choices عندك
+        order.save()
+        serializer = self.get_serializer(order)
+        return Response({"msg": "Payment Successful ✅", "data": serializer.data})
+     
+
 
     def get_queryset(self):
         user = self.request.user
@@ -185,6 +216,69 @@ class DeliveryCrewGroupViewSet(viewsets.ModelViewSet):
 
 
 
+class MenuItemReviewViewSet(viewsets.ModelViewSet):
+    serializer_class = MenuItemReviewSerializer
+    # السماح بالقراءة للجميع، لكن الإضافة / التعديل / الحذف للمستخدمين المسجلين فقط
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    throttle_scope = "review"
 
-    
+    def get_queryset(self):
+        # لو جاي من nested route (مثال: /api/menu-items/2/reviews/)
+        menuitem_id = self.kwargs.get("menuitem_pk")
+        if menuitem_id:
+            return MenuItemReview.objects.filter(menuitem_id=menuitem_id)
+        
+        # لو جاي من /api/reviews/ → رجّع كل الريفيوهات
+        return MenuItemReview.objects.all()
 
+    def perform_create(self, serializer):
+        # لو جاي من nested route لازم أجيب الـ menuitem
+        menuitem_id = self.kwargs.get("menuitem_pk")
+        if not menuitem_id:
+            raise serializers.ValidationError("لازم تضيف الريفيو من خلال المنتج المحدد (/api/menu-items/<id>/reviews/).")
+
+        menuitem = get_object_or_404(MenuItem, id=menuitem_id)
+
+        # امنع نفس اليوزر يكتب أكتر من ريفيو على نفس الـ menuitem
+        if MenuItemReview.objects.filter(menuitem=menuitem, user=self.request.user).exists():
+            raise serializers.ValidationError("لقد قمت بكتابة مراجعة لهذا العنصر بالفعل.")
+
+        serializer.save(user=self.request.user, menuitem=menuitem)
+
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+def initiate_payment(order_id):
+    try:
+        order = Order.objects.get(id=order_id)
+        order_items = OrderItem.objects.filter(order=order)
+
+        line_items = []
+        for item in order_items:
+            line_items.append({
+                "price_data": {
+                    "currency": "usd",  # غيّرها للعملة اللي عايزها (مثلا egp)
+                    "product_data": {
+                        "name": item.menuitem.title,
+                        "description": f"Quantity: {item.quantity}",
+                    },
+                    "unit_amount": int(item.unit_price * 100),  # Stripe بيحسب بالـ cents
+                },
+                "quantity": item.quantity,
+            })
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=line_items,
+            metadata={
+                "order_id": order.id
+            },
+            customer_email=order.user.email,
+            mode="payment",
+            success_url=f"http://127.0.0.1:8000/api/orders/{order.id}/success_payment",
+            cancel_url=f"http://127.0.0.1:8000/api/orders/{order.id}/cancel_payment",
+        )
+        return session
+    except Exception as e:
+        print("Error creating Stripe session:", e)
+        return None

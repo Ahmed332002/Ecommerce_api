@@ -1,8 +1,12 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User, Group
-from .models import MenuItem, Category, Cart, CartItem, Order, OrderItem
+from .models import MenuItem, Category, Cart, CartItem, Order, OrderItem, MenuItemReview
 from djoser.serializers import UserCreateSerializer as DjoserUserCreateSerializer
 from collections import defaultdict
+from django.db import transaction
+from django.db.models import Q
+from rest_framework.exceptions import PermissionDenied
+from django.db import IntegrityError
 
 # Serializer مخصص لـDjoser
 class UserCreateSerializer(DjoserUserCreateSerializer):
@@ -70,25 +74,48 @@ class MenuItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'price', 'inventory', 'category', 'category_id', 'featured']
 
     def create(self, validated_data):
-        category_id=self.context['category_id']
-        return Category.objects.create(id=category_id, **validated_data)
+        category_id = self.context.get('category_id')
+        if category_id:
+            # override category من الـ body أو لو مش موجود ضعها
+            validated_data['category'] = Category.objects.get(pk=category_id)
+        return MenuItem.objects.create(**validated_data)
+
     
     def update(self, instance, validated_data):
-        user = self.context['request'].user
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
 
-        # Managers و Admin يقدروا يغيروا featured
-        if user.is_superuser or user.groups.filter(name="Manager").exists():
-            if validated_data.get('featured', False):
-                # اختياري: نضمن وجود عنصر واحد مميز فقط
-                MenuItem.objects.filter(featured=True).update(featured=False)
-            instance.featured = validated_data.get('featured', instance.featured)
+        featured_in_payload = 'featured' in validated_data
+        # نأخذ قيمة featured ونحذفها من validated_data حتى لا نعيد معالجتها في حلقة الحقول
+        featured_value = validated_data.pop('featured', None)
 
-        # باقي الحقول العادية
-        for attr, value in validated_data.items():
-            if attr != 'featured':
-                setattr(instance, attr, value)
+        # فحص الصلاحية مبكراً
+        if featured_in_payload and not (user and (user.is_superuser or user.groups.filter(name="Manager").exists())):
+            raise PermissionDenied("Only managers/superusers can change the 'featured' status.")
 
-        instance.save()
+        try:
+            # transaction لضمان التزامن
+            with transaction.atomic():
+                if featured_in_payload and featured_value:
+                    # قفل العنصر الحالي وأي عنصر كان مميزًا لتفادي race conditions
+                    locked_qs = MenuItem.objects.select_for_update().filter(Q(featured=True) | Q(pk=instance.pk))
+                    # نُعطّل أي عناصر مميزة أخرى (ما عدا العنصر الحالي)
+                    locked_qs.exclude(pk=instance.pk).filter(featured=True).update(featured=False)
+                    instance.featured = True
+                elif featured_in_payload:
+                    # لو القيمة False: فقط نحدّث قيمة العنصر الحالي بدون تغيير عناصر أخرى
+                    instance.featured = False
+
+                # تحديث الحقول الباقية (مع ملاحظة التعامل الخاص بالـ M2M لاحقًا)
+                for attr, value in validated_data.items():
+                    setattr(instance, attr, value)
+
+                instance.save()
+
+        except IntegrityError:
+            # لو استخدمت قيد فريد على DB هذا ممكن يحدث عند تعارضات متزامنة
+            raise serializers.ValidationError("Could not set featured due to concurrency. Please retry.")
+
         return instance
     
 
@@ -210,8 +237,6 @@ class OrderSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     
 
-    
-
     class Meta:
         model = Order
         fields = ['id', 'user', 'created_at', 'total', 'items','delivery_crew', 'status', 'status_display', 'delivery_crew_name']
@@ -270,3 +295,14 @@ class OrderSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+    
+class MenuItemReviewSerializer(serializers.ModelSerializer):
+        user = serializers.StringRelatedField(read_only=True)
+        menuitem_id = serializers.PrimaryKeyRelatedField(
+        queryset=MenuItem.objects.all(), source='menuitem', write_only=True
+         )
+
+        class Meta:
+            model = MenuItemReview
+            fields = ['id', 'menuitem', 'user', 'rating', 'comment', 'created_at', 'menuitem_id']
+            read_only_fields = ['user', 'created_at', 'menuitem']

@@ -143,10 +143,23 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 4,
+
+     "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",   # للزوار (غير عاملين لوج إن)
+        "rest_framework.throttling.UserRateThrottle",   # للمستخدمين
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+         "anon": "20/minute",   # غير المسجل
+        "user": "60/minute",   # لكل يوزر مسجل
+        "review": "10/minute",
+        "order": "5/minute",
+        "cart": "20/minute",
+        "payment": "3/minute",  # كل يوزر مسجل يقدر يعمل 1000 ريكويست في اليوم
+    }
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=12),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=90),
     'AUTH_HEADER_TYPES': ('JWT',),
     
@@ -156,5 +169,10 @@ DJOSER = {
     'SERIALIZERS': {
         'user_create': 'LittleLemonAPI.serializers.UserCreateSerializer',
         'current_user':'LittleLemonAPI.serializers.UserSerializer',
-    }
+    },
+    "PASSWORD_RESET_CONFIRM_URL": "password/reset/confirm/{uid}/{token}",  
 }
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+STRIPE_SECRET_KEY ='sk_test_51S9DqtDs1DQyStKVbDBFCM1ktIGOXYNcYZVh5AUIzzHd5FPcCTwjgpEb7vw1AeU93kKLv2EyYY0YbdJc61bl3M8q00Kp7AQoFe'
