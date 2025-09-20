@@ -11,6 +11,9 @@ from django.conf import settings
 from rest_framework.decorators import action
 import stripe
 from rest_framework.exceptions import ValidationError
+from django.core.cache import cache
+from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
 
 
 
@@ -27,6 +30,7 @@ class IsDeliveryCrew(permissions.BasePermission):
         return request.user and (request.user.is_superuser or request.user.groups.filter(name='Delivery_crew').exists())
 
 # ViewSet للمنتجات والفئات (عامة)
+@method_decorator(cache_page(60*5), name='list')  # cache 5 دقائق
 class MenuItemViewSet(viewsets.ModelViewSet):
     serializer_class = MenuItemSerializer
     queryset = MenuItem.objects.select_related('category').all()
@@ -53,7 +57,7 @@ class MenuItemViewSet(viewsets.ModelViewSet):
         return context
 
     
-
+@method_decorator(cache_page(60*10), name='list')  # cache 10 دقائق
 class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     queryset = Category.objects.all()
@@ -215,7 +219,7 @@ class DeliveryCrewGroupViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
 
-
+@method_decorator(cache_page(60*5), name='list')
 class MenuItemReviewViewSet(viewsets.ModelViewSet):
     serializer_class = MenuItemReviewSerializer
     # السماح بالقراءة للجميع، لكن الإضافة / التعديل / الحذف للمستخدمين المسجلين فقط

@@ -12,11 +12,13 @@ from django.db import IntegrityError
 class UserCreateSerializer(DjoserUserCreateSerializer):
     class Meta(DjoserUserCreateSerializer.Meta):
         fields = [ 'username','first_name','last_name', 'email', 'password']
+        ref_name = "DjoserUserCreateSerializer"
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'first_name', 'last_name', 'email']
+        ref_name = "CustomUserSerializer"
 
 
 class UserserializerSimple(serializers.ModelSerializer):

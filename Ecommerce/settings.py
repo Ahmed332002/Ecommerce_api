@@ -38,12 +38,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'LittleLemonAPI',
+    'EcommerceApi',
     'rest_framework',
     'django_filters',
     'djoser',
     'rest_framework_simplejwt',
     'rest_framework.authtoken',
+    'drf_yasg',
     
     
 ]
@@ -58,7 +59,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'LittleLemon.urls'
+ROOT_URLCONF = 'Ecommerce.urls'
 
 TEMPLATES = [
     {
@@ -76,7 +77,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'LittleLemon.wsgi.application'
+WSGI_APPLICATION = 'Ecommerce.wsgi.application'
 
 
 # Database
@@ -176,3 +177,11 @@ DJOSER = {
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 STRIPE_SECRET_KEY ='sk_test_51S9DqtDs1DQyStKVbDBFCM1ktIGOXYNcYZVh5AUIzzHd5FPcCTwjgpEb7vw1AeU93kKLv2EyYY0YbdJc61bl3M8q00Kp7AQoFe'
+
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
